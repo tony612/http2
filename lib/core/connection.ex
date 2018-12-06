@@ -65,7 +65,9 @@ defmodule HTTP2.Connection do
     end
   end
 
-  defp parse_buffer(conn) do
+  defp parse_buffer(%{recv_buffer: buffer} = conn) do
+    frame = Framer.parse(buffer)
+
     {:ok, conn}
   end
 end
