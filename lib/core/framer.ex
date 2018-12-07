@@ -19,6 +19,7 @@ defmodule HTTP2.Framer do
     altsvc: 10
   }
   @frame_type_names Enum.map(@frame_types, fn {k, v} -> {v, k} end) |> Enum.into(%{})
+
   @frame_flags %{
     data: [
       end_stream: 0,
@@ -76,6 +77,7 @@ defmodule HTTP2.Framer do
   end
 
   defp parse_payload(:data, %{length: len} = frame, buf) do
+    # TODO: padding
     case buf do
       <<payload::bytes-size(len), rest::binary>> ->
         {Map.put(frame, :payload, payload), rest}
@@ -83,5 +85,29 @@ defmodule HTTP2.Framer do
       _ ->
         nil
     end
+  end
+
+  defp parse_payload(:headers, %{length: len, flags: flags} = frame, buf) do
+    # TODO: padding
+    {frame, buf} =
+      if Enum.member?(flags, :priority) do
+        priority_fields(frame, buf)
+      else
+        {frame, buf}
+      end
+
+    case buf do
+      <<payload::bytes-size(len), rest::binary>> ->
+        {Map.put(frame, :payload, payload), rest}
+
+      _ ->
+        nil
+    end
+  end
+
+  defp priority_fields(frame, buf) do
+    <<e::1, sd::unsigned-31, weight::unsigned-8, new_buf::binary>> = buf
+    fields = %{exclusive: e != 0, stream_dependency: sd, weight: weight + 1}
+    {Map.merge(frame, fields), new_buf}
   end
 end

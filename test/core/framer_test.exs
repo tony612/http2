@@ -11,7 +11,7 @@ defmodule HTTP2.FramerTest do
 
   test "parse/1 DATA frame works" do
     buffer = <<1::24, 0, 1, 1::32, 1, 2>>
-    assert {%{length: 1, type: :data, flags: [:end_stream], stream_id: 1}, <<2>>} = parse(buffer)
+    assert {%{length: 1, type: :data, flags: [:end_stream], stream_id: 1, payload: <<1>>}, <<2>>} = parse(buffer)
   end
 
   test "parse/1 DATA frame nil" do
@@ -28,5 +28,17 @@ defmodule HTTP2.FramerTest do
     assert [:end_stream, :compressed] == type_flags(:data, 33)
     assert [:end_stream, :padded, :compressed] == type_flags(:data, 41)
     assert [:end_stream, :end_headers] == type_flags(:headers, 5)
+  end
+
+  test "parse/1 HEADERS frame works" do
+    buffer = <<1::24, 1, 1, 1::32, 1, 2>>
+    assert {%{length: 1, type: :headers, flags: [:end_stream], stream_id: 1, payload: <<1>>}, <<2>>} = parse(buffer)
+  end
+
+  test "parse/1 HEADERS frame works for priority" do
+    buffer = <<1::24, 1, 32, 1::32, 1::1, 2::31, 3, 4>>
+
+    assert {%{length: 1, type: :headers, flags: [:priority], stream_id: 1, payload: <<4>>, weight: 4}, <<>>} =
+             parse(buffer)
   end
 end
