@@ -46,8 +46,7 @@ defmodule HTTP2.Framer do
     altsvc: []
   }
 
-  def parse(<<len::unsigned-24, type::unsigned-8, flags::unsigned-8, _::1, stream_id::unsigned-31, rest::binary>>)
-      when stream_id != 0 do
+  def parse(<<len::unsigned-24, type::unsigned-8, flags::unsigned-8, _::1, stream_id::unsigned-31, rest::binary>>) do
     if len > @default_max_frame_size do
       {:error, {:protocol_error, "payload too large"}}
     else
@@ -103,6 +102,10 @@ defmodule HTTP2.Framer do
       _ ->
         nil
     end
+  end
+
+  defp parse_payload(:priority, frame, buf) do
+    priority_fields(frame, buf)
   end
 
   defp priority_fields(frame, buf) do

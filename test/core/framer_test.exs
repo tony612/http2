@@ -38,7 +38,36 @@ defmodule HTTP2.FramerTest do
   test "parse/1 HEADERS frame works for priority" do
     buffer = <<1::24, 1, 32, 1::32, 1::1, 2::31, 3, 4>>
 
-    assert {%{length: 1, type: :headers, flags: [:priority], stream_id: 1, payload: <<4>>, weight: 4}, <<>>} =
-             parse(buffer)
+    assert {%{
+              length: 1,
+              type: :headers,
+              flags: [:priority],
+              stream_id: 1,
+              exclusive: true,
+              stream_dependency: 2,
+              weight: 4,
+              payload: <<4>>
+            }, <<>>} = parse(buffer)
+  end
+
+  test "parse/1 PRIORITY frame works" do
+    buffer = <<1::24, 2, 32, 1::32, 1::1, 2::31, 2>>
+
+    assert {%{length: 1, type: :priority, flags: [], stream_id: 1, exclusive: true, stream_dependency: 2, weight: 3},
+            <<>>} = parse(buffer)
+  end
+
+  test "parse/1 PRIORITY frame non-exclusive" do
+    buffer = <<1::24, 2, 32, 1::32, 0::1, 123::31, 10>>
+
+    assert {%{
+              length: 1,
+              type: :priority,
+              flags: [],
+              stream_id: 1,
+              exclusive: false,
+              stream_dependency: 123,
+              weight: 11
+            }, <<>>} = parse(buffer)
   end
 end
