@@ -142,7 +142,9 @@ defmodule HTTP2.FramerTest do
 
   test "parse/1 GOAWAY frame works" do
     buffer = <<9::24, 7, 1, 1::32, 0::1, 321::31, 1::32, 123>>
-    assert {%{length: 9, type: :goaway, stream_id: 1, last_stream: 321, error: :protocol_error, payload: <<123>>}, <<>>} = parse(buffer)
+
+    assert {%{length: 9, type: :goaway, stream_id: 1, last_stream: 321, error: :protocol_error, payload: <<123>>}, <<>>} =
+             parse(buffer)
   end
 
   test "parse/1 WINDOW_UPDATE frame works" do

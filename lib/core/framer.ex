@@ -1,9 +1,7 @@
 defmodule HTTP2.Framer do
   use Bitwise, only_operators: true
-  # 2^31 - 1
-  defmacro max_stream_id, do: 0x7FFFFFFF
-  # 2^14
-  @default_max_frame_size 16384
+  alias HTTP2.Const
+  require HTTP2.Const
 
   @frame_types %{
     data: 0,
@@ -74,7 +72,7 @@ defmodule HTTP2.Framer do
 
   def parse(<<len::unsigned-24, type::unsigned-8, flags::unsigned-8, _::1, stream_id::unsigned-31, rest::binary>>)
       when byte_size(rest) >= len do
-    if len > @default_max_frame_size do
+    if len > Const.init_max_frame_size() do
       raise HTTP2.ProtocolError, message: "Frame length is too large"
     else
       type = @frame_type_names[type]
@@ -168,10 +166,13 @@ defmodule HTTP2.Framer do
     error = unpack_error(err)
     len = len - 8
     <<payload::bytes-size(len), rest::binary>> = buf
-    frame = frame
-    |> Map.put(:last_stream, stream)
-    |> Map.put(:error, error)
-    |> Map.put(:payload, payload)
+
+    frame =
+      frame
+      |> Map.put(:last_stream, stream)
+      |> Map.put(:error, error)
+      |> Map.put(:payload, payload)
+
     {frame, rest}
   end
 
@@ -182,6 +183,11 @@ defmodule HTTP2.Framer do
   defp parse_payload(:continuation, frame = %{length: len}, buf) do
     <<payload::bytes-size(len), rest::binary>> = buf
     {Map.put(frame, :payload, payload), rest}
+  end
+
+  defp parse_payload(:altsvc, frame = %{length: len}, buf) do
+    # TODO
+    nil
   end
 
   defp priority_fields(frame, buf) do

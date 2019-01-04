@@ -1,17 +1,17 @@
 defmodule HTTP2.Connection do
-  alias HTTP2.Framer
-  require HTTP2.Framer
+  alias HTTP2.Const
+  require HTTP2.Const
 
   # Default values for SETTINGS frame, as defined by the spec.
   @spec_default_connection_settings %{
     settings_header_table_size: 4096,
     # enabled for servers
     settings_enable_push: 1,
-    settings_max_concurrent_streams: Framer.max_stream_id(),
-    settings_initial_window_size: 65_535,
-    settings_max_frame_size: 16_384,
+    settings_max_concurrent_streams: Const.max_stream_id(),
+    settings_initial_window_size: Const.init_window_size(),
+    settings_max_frame_size: Const.init_max_frame_size(),
     # 2^31 - 1
-    settings_max_header_list_size: 0x7FFFFFFF
+    settings_max_header_list_size: Const.init_max_header_list_size()
   }
 
   override_settings = %{
@@ -25,9 +25,17 @@ defmodule HTTP2.Connection do
   @type t :: %__MODULE__{
           state: atom,
           recv_buffer: binary,
-          local_settings: map
+          local_settings: map,
+          continuation: list,
+          pending_settings: list,
+          remote_role: atom
         }
-  defstruct state: nil, recv_buffer: <<>>, local_settings: @default_connection_settings
+  defstruct state: nil,
+            recv_buffer: <<>>,
+            local_settings: @default_connection_settings,
+            continuation: [],
+            pending_settings: [],
+            remote_role: nil
 
   def settings(_payload) do
     # TODO
@@ -66,8 +74,68 @@ defmodule HTTP2.Connection do
   end
 
   defp parse_buffer(%{recv_buffer: buffer} = conn) do
-    frame = Framer.parse(buffer)
+    case HTTP2.Framer.parse(buffer) do
+      nil ->
+        {:ok, conn}
 
-    {:ok, conn}
+      frame ->
+        # TODO: continuation
+        {conn, frame} = handle_frame(conn, frame)
+        {:ok, conn}
+    end
+  end
+
+  defp handle_frame(conn, %{stream_id: stream_id, type: type} = frame)
+       when stream_id == 0 or type in [:settings, :ping, :goaway] do
+    connection_manage(conn, frame)
+  end
+
+  defp connection_manage(%{state: :waiting_connection_preface} = conn, frame) do
+    conn = %{conn | state: :connected}
+    connection_setting(conn, frame)
+  end
+
+  defp connection_setting(conn, %{type: :settings, stream_id: 0, flags: flags} = frame) do
+    {settings, side} =
+      if Enum.member?(flags, :ack) do
+        %{pending_settings: [settings | _]} = conn
+        {settings, :local}
+      else
+        %{remote_role: remote_role} = conn
+        %{payload: payload} = frame
+        err = validate_settings(remote_role, payload)
+        if err, do: connection_error!(err)
+        {payload, :remote}
+      end
+  end
+
+  # private
+  @doc false
+  def validate_settings(_, []) do
+    nil
+  end
+
+  def validate_settings(:server, [{:settings_enable_push = key, v} | t]) when v != 0 do
+    HTTP2.ProtocolError.exception(message: "invalid value for #{key}")
+  end
+
+  def validate_settings(:client, [{:settings_enable_push = key, v} | t]) when v != 0 and v != 1 do
+    HTTP2.ProtocolError.exception(message: "invalid value for #{key}")
+  end
+
+  def validate_settings(_, [{:settings_initial_window_size = key, v} | t]) when v > Const.max_window_size() do
+    HTTP2.ProtocolError.exception(message: "invalid value for #{key}")
+  end
+
+  def validate_settings(_, [{:settings_max_frame_size = key, v} | t])
+      when v < Const.init_max_frame_size() or v > Const.allowed_max_frame_size() do
+    HTTP2.ProtocolError.exception(message: "invalid value for #{key}")
+  end
+
+  def validate_settings(role, [{_, _} | t]) do
+    validate_settings(role, t)
+  end
+
+  defp connection_error!(error) do
   end
 end
