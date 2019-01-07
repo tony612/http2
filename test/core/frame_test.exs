@@ -1,8 +1,8 @@
-defmodule HTTP2.FramerTest do
+defmodule HTTP2.FrameTest do
   use ExUnit.Case, async: true
 
-  # alias HTTP2.Framer
-  import HTTP2.Framer
+  # alias HTTP2.Frame
+  import HTTP2.Frame
 
   test "parse/1 returns nil" do
     refute parse(<<>>)
@@ -51,9 +51,11 @@ defmodule HTTP2.FramerTest do
               type: :headers,
               flags: [:priority],
               stream_id: 1,
-              exclusive: true,
-              stream_dependency: 2,
-              weight: 4,
+              others: %{
+                exclusive: true,
+                stream_dependency: 2,
+                weight: 4
+              },
               payload: <<4>>
             }, <<>>} = parse(buffer)
   end
@@ -61,8 +63,13 @@ defmodule HTTP2.FramerTest do
   test "parse/1 PRIORITY frame works" do
     buffer = <<1::24, 2, 32, 1::32, 1::1, 2::31, 2>>
 
-    assert {%{length: 1, type: :priority, flags: [], stream_id: 1, exclusive: true, stream_dependency: 2, weight: 3},
-            <<>>} = parse(buffer)
+    assert {%{
+              length: 1,
+              type: :priority,
+              flags: [],
+              stream_id: 1,
+              others: %{exclusive: true, stream_dependency: 2, weight: 3}
+            }, <<>>} = parse(buffer)
   end
 
   test "parse/1 PRIORITY frame non-exclusive" do
@@ -73,17 +80,19 @@ defmodule HTTP2.FramerTest do
               type: :priority,
               flags: [],
               stream_id: 1,
-              exclusive: false,
-              stream_dependency: 123,
-              weight: 11
+              others: %{
+                exclusive: false,
+                stream_dependency: 123,
+                weight: 11
+              }
             }, <<>>} = parse(buffer)
   end
 
   test "parse/1 RST_STREAM frame works" do
     buffer = <<1::24, 3, 1, 1::32, 1::32>>
-    assert {%{length: 1, type: :rst_stream, stream_id: 1, error: :protocol_error}, <<>>} = parse(buffer)
+    assert {%{length: 1, type: :rst_stream, stream_id: 1, others: %{error: :protocol_error}}, <<>>} = parse(buffer)
     buffer = <<1::24, 3, 1, 1::32, 12::32>>
-    assert {%{length: 1, type: :rst_stream, stream_id: 1, error: :inadequate_security}, <<>>} = parse(buffer)
+    assert {%{length: 1, type: :rst_stream, stream_id: 1, others: %{error: :inadequate_security}}, <<>>} = parse(buffer)
   end
 
   test "parse/1 SETTINGS frame raise error for invalid length" do
@@ -127,7 +136,9 @@ defmodule HTTP2.FramerTest do
 
   test "parse/1 PUSH_PROMISE frame works" do
     buffer = <<1::24, 5, 1, 1::32, 1::1, 10::31, 123>>
-    assert {%{length: 1, type: :push_promise, stream_id: 1, payload: <<123>>, promise_stream: 10}, <<>>} = parse(buffer)
+
+    assert {%{length: 1, type: :push_promise, stream_id: 1, payload: <<123>>, others: %{promise_stream_id: 10}}, <<>>} =
+             parse(buffer)
   end
 
   test "parse/1 PUSH_PROMISE frame no enought payload" do
@@ -143,13 +154,18 @@ defmodule HTTP2.FramerTest do
   test "parse/1 GOAWAY frame works" do
     buffer = <<9::24, 7, 1, 1::32, 0::1, 321::31, 1::32, 123>>
 
-    assert {%{length: 9, type: :goaway, stream_id: 1, last_stream: 321, error: :protocol_error, payload: <<123>>}, <<>>} =
-             parse(buffer)
+    assert {%{
+              length: 9,
+              type: :goaway,
+              stream_id: 1,
+              others: %{last_stream_id: 321, error: :protocol_error},
+              payload: <<123>>
+            }, <<>>} = parse(buffer)
   end
 
   test "parse/1 WINDOW_UPDATE frame works" do
     buffer = <<4::24, 8, 1, 1::32, 0::1, 123::31>>
-    assert {%{length: 4, type: :window_update, stream_id: 1, increment: 123}, <<>>} = parse(buffer)
+    assert {%{length: 4, type: :window_update, stream_id: 1, others: %{increment: 123}}, <<>>} = parse(buffer)
   end
 
   test "parse/1 CONTINUATION frame works" do

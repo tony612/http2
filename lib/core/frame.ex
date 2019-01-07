@@ -1,4 +1,4 @@
-defmodule HTTP2.Framer do
+defmodule HTTP2.Frame do
   use Bitwise, only_operators: true
   alias HTTP2.Const
   require HTTP2.Const
@@ -70,6 +70,9 @@ defmodule HTTP2.Framer do
     settings_max_header_list_size: 6
   }
 
+  # others: %{error:, increment: , exclusive: nil, stream_dependency: nil, weight: nil}
+  defstruct length: 0, type: nil, flags: [], stream_id: nil, payload: nil, others: %{}
+
   def parse(<<len::unsigned-24, type::unsigned-8, flags::unsigned-8, _::1, stream_id::unsigned-31, rest::binary>>)
       when byte_size(rest) >= len do
     if len > Const.init_max_frame_size() do
@@ -77,7 +80,7 @@ defmodule HTTP2.Framer do
     else
       type = @frame_type_names[type]
       flags = type_flags(type, flags)
-      frame = %{length: len, type: type, flags: flags, stream_id: stream_id}
+      frame = %__MODULE__{length: len, type: type, flags: flags, stream_id: stream_id}
 
       parse_payload(type, frame, rest)
     end
@@ -103,7 +106,7 @@ defmodule HTTP2.Framer do
   defp parse_payload(:data, %{length: len} = frame, buf) do
     # TODO: padding
     <<payload::bytes-size(len), rest::binary>> = buf
-    {Map.put(frame, :payload, payload), rest}
+    {%{frame | payload: payload}, rest}
   end
 
   defp parse_payload(:headers, %{length: len, flags: flags} = frame, buf) do
@@ -116,16 +119,16 @@ defmodule HTTP2.Framer do
       end
 
     <<payload::bytes-size(len), rest::binary>> = buf
-    {Map.put(frame, :payload, payload), rest}
+    {%{frame | payload: payload}, rest}
   end
 
   defp parse_payload(:priority, frame, buf) do
     priority_fields(frame, buf)
   end
 
-  defp parse_payload(:rst_stream, frame, <<err::unsigned-32, new_buf::binary>>) do
+  defp parse_payload(:rst_stream, %{others: others} = frame, <<err::unsigned-32, new_buf::binary>>) do
     error = unpack_error(err)
-    {Map.put(frame, :error, error), new_buf}
+    {%{frame | others: Map.put(others, :error, error)}, new_buf}
   end
 
   defp parse_payload(:settings, frame = %{length: len, stream_id: stream_id}, buf) do
@@ -138,17 +141,14 @@ defmodule HTTP2.Framer do
     end
 
     {new_buf, payload} = parse_settings(div(len, 6), buf, [])
-    {Map.put(frame, :payload, payload), new_buf}
+    {%{frame | payload: payload}, new_buf}
   end
 
-  defp parse_payload(:push_promise, frame = %{length: len}, <<_::1, stream::unsigned-31, buf::binary>>) do
+  defp parse_payload(:push_promise, frame = %{length: len, others: others}, <<_::1, stream::unsigned-31, buf::binary>>) do
     # TODO: padding
     case buf do
       <<payload::bytes-size(len), rest::binary>> ->
-        frame =
-          frame
-          |> Map.put(:promise_stream, stream)
-          |> Map.put(:payload, payload)
+        frame = %{frame | payload: payload, others: Map.put(others, :promise_stream_id, stream)}
 
         {frame, rest}
 
@@ -159,30 +159,34 @@ defmodule HTTP2.Framer do
 
   defp parse_payload(:ping, frame = %{length: len}, buf) do
     <<payload::bytes-size(len), rest::binary>> = buf
-    {Map.put(frame, :payload, payload), rest}
+    {%{frame | payload: payload}, rest}
   end
 
-  defp parse_payload(:goaway, frame = %{length: len}, <<_::1, stream::unsigned-31, err::unsigned-32, buf::binary>>) do
+  defp parse_payload(
+         :goaway,
+         frame = %{length: len, others: others},
+         <<_::1, stream::unsigned-31, err::unsigned-32, buf::binary>>
+       ) do
     error = unpack_error(err)
     len = len - 8
     <<payload::bytes-size(len), rest::binary>> = buf
 
-    frame =
-      frame
-      |> Map.put(:last_stream, stream)
+    others =
+      others
+      |> Map.put(:last_stream_id, stream)
       |> Map.put(:error, error)
-      |> Map.put(:payload, payload)
 
+    frame = %{frame | payload: payload, others: others}
     {frame, rest}
   end
 
-  defp parse_payload(:window_update, frame, <<_::1, incr::unsigned-31, rest::binary>>) do
-    {Map.put(frame, :increment, incr), rest}
+  defp parse_payload(:window_update, %{others: others} = frame, <<_::1, incr::unsigned-31, rest::binary>>) do
+    {%{frame | others: Map.put(others, :increment, incr)}, rest}
   end
 
   defp parse_payload(:continuation, frame = %{length: len}, buf) do
     <<payload::bytes-size(len), rest::binary>> = buf
-    {Map.put(frame, :payload, payload), rest}
+    {%{frame | payload: payload}, rest}
   end
 
   defp parse_payload(:altsvc, frame = %{length: len}, buf) do
@@ -190,10 +194,16 @@ defmodule HTTP2.Framer do
     nil
   end
 
-  defp priority_fields(frame, buf) do
+  defp priority_fields(%{others: others} = frame, buf) do
     <<e::1, sd::unsigned-31, weight::unsigned-8, new_buf::binary>> = buf
-    fields = %{exclusive: e != 0, stream_dependency: sd, weight: weight + 1}
-    {Map.merge(frame, fields), new_buf}
+
+    others =
+      others
+      |> Map.put(:exclusive, e != 0)
+      |> Map.put(:stream_dependency, sd)
+      |> Map.put(:weight, weight + 1)
+
+    {%{frame | others: others}, new_buf}
   end
 
   defp parse_settings(0, buf, settings), do: {buf, Enum.reverse(settings)}
