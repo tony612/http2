@@ -62,12 +62,12 @@ defmodule HTTP2.Frame do
   }
 
   @defined_settings %{
-    settings_header_table_size: 1,
-    settings_enable_push: 2,
-    settings_max_concurrent_streams: 3,
-    settings_initial_window_size: 4,
-    settings_max_frame_size: 5,
-    settings_max_header_list_size: 6
+    header_table_size: 1,
+    enable_push: 2,
+    max_concurrent_streams: 3,
+    initial_window_size: 4,
+    max_frame_size: 5,
+    max_header_list_size: 6
   }
 
   # others: %{error:, increment: , exclusive: nil, stream_dependency: nil, weight: nil}
@@ -189,7 +189,7 @@ defmodule HTTP2.Frame do
     {%{frame | payload: payload}, rest}
   end
 
-  defp parse_payload(:altsvc, frame = %{length: len}, buf) do
+  defp parse_payload(:altsvc, _frame = %{length: _len}, _buf) do
     # TODO
     nil
   end
@@ -209,14 +209,14 @@ defmodule HTTP2.Frame do
   defp parse_settings(0, buf, settings), do: {buf, Enum.reverse(settings)}
 
   defp parse_settings(len, <<id::unsigned-16, val::unsigned-32, buf::binary>>, settings) do
-    case Enum.find(@defined_settings, fn {name, v} -> v == id end) do
+    case Enum.find(@defined_settings, fn {_name, v} -> v == id end) do
       {name, _} -> parse_settings(len - 1, buf, [{name, val} | settings])
       _ -> parse_settings(len - 1, buf, settings)
     end
   end
 
   defp unpack_error(err_num) do
-    {err, _} = Enum.find(@defined_errors, {err_num, err_num}, fn {k, v} -> v == err_num end)
+    {err, _} = Enum.find(@defined_errors, {err_num, err_num}, fn {_k, v} -> v == err_num end)
     err
   end
 end

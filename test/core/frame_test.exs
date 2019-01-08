@@ -114,8 +114,7 @@ defmodule HTTP2.FrameTest do
   test "parse/1 SETTINGS frame works" do
     buffer = <<6::24, 4, 1, 0::32, 1::16, 123::32>>
 
-    assert {%{length: 6, type: :settings, stream_id: 0, payload: [{:settings_header_table_size, 123}]}, <<>>} =
-             parse(buffer)
+    assert {%{length: 6, type: :settings, stream_id: 0, payload: [{:header_table_size, 123}]}, <<>>} = parse(buffer)
 
     buffer = <<12::24, 4, 1, 0::32, 1::16, 123::32, 6::16, 321::32>>
 
@@ -123,15 +122,14 @@ defmodule HTTP2.FrameTest do
               length: 12,
               type: :settings,
               stream_id: 0,
-              payload: [settings_header_table_size: 123, settings_max_header_list_size: 321]
+              payload: [header_table_size: 123, max_header_list_size: 321]
             }, <<>>} = parse(buffer)
   end
 
   test "parse/1 SETTINGS frame skip unknown settings" do
     buffer = <<12::24, 4, 1, 0::32, 7::16, 123::32, 6::16, 321::32>>
 
-    assert {%{length: 12, type: :settings, stream_id: 0, payload: [settings_max_header_list_size: 321]}, <<>>} =
-             parse(buffer)
+    assert {%{length: 12, type: :settings, stream_id: 0, payload: [max_header_list_size: 321]}, <<>>} = parse(buffer)
   end
 
   test "parse/1 PUSH_PROMISE frame works" do
