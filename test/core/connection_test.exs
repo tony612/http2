@@ -153,4 +153,36 @@ defmodule HTTP2.ConnectionTest do
              compressor: %{table_size: 1234}
            } = handle_frame(conn, frame)
   end
+
+  test "handle_frame/2 connection handle window_update when connected" do
+    conn = %Connection{state: :connected, remote_role: :client, remote_window: 40000}
+    frame = %Frame{stream_id: 0, type: :window_update, payload: 10000}
+    assert %{remote_window: 50000} = handle_frame(conn, frame)
+  end
+
+  test "handle_frame/2 connection handle ping when connected" do
+    conn = %Connection{state: :connected, remote_role: :client}
+    frame = %Frame{stream_id: 0, type: :ping}
+    assert handle_frame(conn, frame)
+  end
+
+  test "handle_frame/2 connection handle settings when connected" do
+    conn = %Connection{state: :connected, remote_role: :client}
+    frame = %Frame{stream_id: 0, type: :settings, payload: [initial_window_size: 75000]}
+    assert %{remote_window_limit: 75000} = handle_frame(conn, frame)
+  end
+
+  test "handle_frame/2 connection handle goaway when connected" do
+    conn = %Connection{state: :connected, remote_role: :client}
+    frame = %Frame{stream_id: 0, type: :goaway}
+    assert %{state: :closed, others: %{closed_since: _}} = handle_frame(conn, frame)
+  end
+
+  test "handle_frame/2 connection handle altsvc/blocked when connected" do
+    conn = %Connection{state: :connected, remote_role: :client}
+    frame = %Frame{stream_id: 0, type: :altsvc}
+    assert handle_frame(conn, frame)
+    frame = %Frame{stream_id: 0, type: :blocked}
+    assert handle_frame(conn, frame)
+  end
 end

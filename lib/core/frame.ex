@@ -180,8 +180,8 @@ defmodule HTTP2.Frame do
     {frame, rest}
   end
 
-  defp parse_payload(:window_update, %{others: others} = frame, <<_::1, incr::unsigned-31, rest::binary>>) do
-    {%{frame | others: Map.put(others, :increment, incr)}, rest}
+  defp parse_payload(:window_update, frame, <<_::1, incr::unsigned-31, rest::binary>>) do
+    {%{frame | payload: incr}, rest}
   end
 
   defp parse_payload(:continuation, frame = %{length: len}, buf) do

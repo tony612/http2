@@ -37,7 +37,8 @@ defmodule HTTP2.Connection do
           pending_settings: list,
           h2c_upgrade: atom,
           compressor: map,
-          decompressor: map
+          decompressor: map,
+          others: map
         }
   defstruct state: nil,
             recv_buffer: <<>>,
@@ -53,7 +54,8 @@ defmodule HTTP2.Connection do
             pending_settings: [],
             h2c_upgrade: nil,
             compressor: %{},
-            decompressor: %{}
+            decompressor: %{},
+            others: %{}
 
   def settings(_payload) do
     # TODO
@@ -113,6 +115,49 @@ defmodule HTTP2.Connection do
   defp connection_manage(%{state: :waiting_connection_preface} = conn, frame) do
     conn = %{conn | state: :connected}
     connection_settings(conn, frame)
+  end
+
+  defp connection_manage(%{state: :connected} = conn, %{type: type} = frame) do
+    case type do
+      :window_update ->
+        # TODO send_data
+        %{remote_window: window} = conn
+        IO.inspect window
+        %{payload: incr} = frame
+        %{conn | remote_window: window + incr}
+
+      :ping ->
+        # TODO
+        # send_frame(%{type: ping, stream_id: 0, payload: frame.payload, flags: [:ack]})
+        conn
+
+      :settings ->
+        connection_settings(conn, frame)
+
+      :goaway ->
+        others = Map.put(conn.others, :closed_since, Time.utc_now())
+        %{conn | state: :closed, others: others}
+
+      :altsvc ->
+        # TODO
+        conn
+
+      :blocked ->
+        conn
+
+      _ ->
+        connection_error!()
+    end
+  end
+
+  defp connection_manage(%{state: :closed, others: %{closed_since: closed_since}}, _frame) do
+    if Time.diff(Time.utc_now(), closed_since) > 15 do
+      connection_error!()
+    end
+  end
+
+  defp connection_manage(_, _) do
+    connection_error!()
   end
 
   defp connection_settings(conn, %{type: :settings, stream_id: 0, flags: flags} = frame) do
@@ -228,7 +273,7 @@ defmodule HTTP2.Connection do
     validate_settings(role, t)
   end
 
-  defp connection_error!(error) do
+  defp connection_error!(error \\ :protocol_error) do
     # TODO
   end
 end

@@ -163,7 +163,7 @@ defmodule HTTP2.FrameTest do
 
   test "parse/1 WINDOW_UPDATE frame works" do
     buffer = <<4::24, 8, 1, 1::32, 0::1, 123::31>>
-    assert {%{length: 4, type: :window_update, stream_id: 1, others: %{increment: 123}}, <<>>} = parse(buffer)
+    assert {%{length: 4, type: :window_update, stream_id: 1, payload: 123}, <<>>} = parse(buffer)
   end
 
   test "parse/1 CONTINUATION frame works" do
