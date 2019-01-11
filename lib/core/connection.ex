@@ -41,7 +41,8 @@ defmodule HTTP2.Connection do
           compressor: map,
           decompressor: map,
           others: map,
-          events_handler: any
+          events_handler: any,
+          streams: map
         }
   defstruct state: nil,
             latest_stream_id: nil,
@@ -60,10 +61,16 @@ defmodule HTTP2.Connection do
             compressor: %{},
             decompressor: %{},
             others: %{},
-            events_handler: nil
+            events_handler: nil,
+            streams: %{}
 
-  def new() do
-    %__MODULE__{}
+  def new(attrs \\ %{}) do
+    conn = %__MODULE__{
+      compressor: HTTP2.HPACK.new(@spec_default_connection_settings[:header_table_size]),
+      decompressor: HTTP2.HPACK.new(@spec_default_connection_settings[:header_table_size])
+    }
+
+    Map.merge(conn, attrs)
   end
 
   def new_server() do
@@ -147,6 +154,47 @@ defmodule HTTP2.Connection do
   def handle_frame(conn, %{stream_id: stream_id, type: type} = frame)
       when stream_id == 0 or type in [:settings, :ping, :goaway] do
     connection_manage(conn, frame)
+  end
+
+  def handle_frame(%{local_role: :server}, %{type: :headers, stream_id: id}) when rem(id, 2) == 0 do
+    connection_error!()
+  end
+
+  def handle_frame(conn, %{type: :headers, flags: flags, stream_id: stream_id, streams: streams} = frame) do
+    if Enum.member?(flags, :end_headers) do
+      %{decompressor: table, state: state} = conn
+
+      case HTTP2.HPACK.decode(frame, table) do
+        {:ok, headers, table} ->
+          conn = %{conn | decompressor: table}
+          frame = %{frame | payload: headers}
+
+          if state == :closed do
+            {conn, frame}
+          else
+            stream =
+              case Map.fetch(streams, stream_id) do
+                {:ok, s} ->
+                  s
+
+                :error ->
+                  s = activate_stream(stream_id)
+              end
+
+            # TODO stream recv
+          end
+
+        {:error, error} ->
+          connection_error!(error)
+      end
+    else
+      %{continuation: continuation} = conn
+      %{conn | continuation: [frame | continuation]}
+    end
+  end
+
+  def handle_frame(conn, %{type: _} = frame) do
+    # TODO push_promise and others
   end
 
   defp connection_manage(%{state: :waiting_connection_preface} = conn, frame) do
@@ -315,5 +363,8 @@ defmodule HTTP2.Connection do
 
   defp connection_error!(error \\ :protocol_error) do
     # TODO
+  end
+
+  def activate_stream(id) do
   end
 end
