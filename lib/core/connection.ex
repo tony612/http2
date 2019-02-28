@@ -1,6 +1,7 @@
 defmodule HTTP2.Connection do
   alias HTTP2.Const
   require HTTP2.Const
+  require Logger
 
   # Default values for SETTINGS frame, as defined by the spec.
   @spec_default_connection_settings %{
@@ -24,6 +25,7 @@ defmodule HTTP2.Connection do
 
   @type t :: %__MODULE__{
           state: atom,
+          latest_stream_id: integer,
           recv_buffer: binary,
           local_settings: map,
           local_window_limit: integer,
@@ -38,9 +40,11 @@ defmodule HTTP2.Connection do
           h2c_upgrade: atom,
           compressor: map,
           decompressor: map,
-          others: map
+          others: map,
+          events_handler: any
         }
   defstruct state: nil,
+            latest_stream_id: nil,
             recv_buffer: <<>>,
             local_settings: @default_connection_settings,
             local_window_limit: @default_connection_settings[:initial_window_size],
@@ -55,10 +59,41 @@ defmodule HTTP2.Connection do
             h2c_upgrade: nil,
             compressor: %{},
             decompressor: %{},
-            others: %{}
+            others: %{},
+            events_handler: nil
+
+  def new() do
+    %__MODULE__{}
+  end
+
+  def new_server() do
+    conn = new()
+    %{ conn | latest_stream_id: 2, state: :waiting_magic, local_role: :server, remote_role: :client}
+  end
+
+  def new_client() do
+    conn = new()
+    %{ conn | latest_stream_id: 1, state: :waiting_connection_preface, local_role: :client, remote_role: :server}
+  end
 
   def settings(_payload) do
     # TODO
+  end
+
+  defp send(conn, %{type: :data}) do
+    # TODO
+  end
+
+  defp send(conn, %{type: :rst_stream, others: %{error: :protocol_error}}) do
+    # TODO
+  end
+
+  defp send(%{events_handler: handler}, frame) do
+    frames = encode(conn, frame)
+    Enum.reduce(frames, conn, fn f, conn ->
+      HTTP2.ConnHandler.handle(handler, :frame, f)
+      conn
+    end)
   end
 
   @spec recv(t, binary) :: t
@@ -69,6 +104,7 @@ defmodule HTTP2.Connection do
   defp parse_buffer(%{state: :waiting_magic, recv_buffer: buffer} = conn) do
     case buffer do
       <<@preface_magic, rest::binary>> ->
+        Logger.debug("Got preface magic")
         local_settings =
           Enum.reject(conn.local_settings, fn {k, v} ->
             v == @spec_default_connection_settings[k]
@@ -98,7 +134,8 @@ defmodule HTTP2.Connection do
       nil ->
         {:ok, conn}
 
-      frame ->
+      {frame, rest} ->
+        Logger.debug("Got frame #{inspect(frame)}")
         # TODO: continuation
         conn = handle_frame(conn, frame)
         {:ok, conn}
@@ -122,7 +159,6 @@ defmodule HTTP2.Connection do
       :window_update ->
         # TODO send_data
         %{remote_window: window} = conn
-        IO.inspect window
         %{payload: incr} = frame
         %{conn | remote_window: window + incr}
 
@@ -244,6 +280,10 @@ defmodule HTTP2.Connection do
 
   defp remote_setting(:header_table_size, v, %{decompressor: decompressor} = conn) do
     %{conn | decompressor: Map.put(decompressor, :table_size, v)}
+  end
+
+  defp remote_setting(_, _, conn) do
+    conn
   end
 
   # private

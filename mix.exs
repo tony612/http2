@@ -23,7 +23,8 @@ defmodule HTTP2.MixProject do
   # Run "mix help deps" to learn about dependencies.
   defp deps do
     [
-      {:excoveralls, "~> 0.10", only: :test}
+      {:excoveralls, "~> 0.10", only: :test},
+      {:ranch, "~> 1.7"}
     ]
   end
 end
