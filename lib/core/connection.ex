@@ -141,11 +141,16 @@ defmodule HTTP2.Connection do
       nil ->
         {:ok, conn}
 
+      {frame, <<>>} ->
+        Logger.debug("Got frame #{inspect(frame)}")
+        conn = handle_frame(conn, frame)
+        {:ok, conn}
+
       {frame, rest} ->
         Logger.debug("Got frame #{inspect(frame)}")
         # TODO: continuation
         conn = handle_frame(conn, frame)
-        {:ok, conn}
+        parse_buffer(%{conn | recv_buffer: rest})
     end
   end
 
@@ -169,6 +174,7 @@ defmodule HTTP2.Connection do
           conn = %{conn | decompressor: table}
           frame = %{frame | payload: headers}
 
+          # Some headers still should be handled after closed
           if state == :closed do
             {conn, frame}
           else
@@ -366,5 +372,6 @@ defmodule HTTP2.Connection do
   end
 
   def activate_stream(id) do
+
   end
 end

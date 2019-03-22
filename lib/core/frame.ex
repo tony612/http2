@@ -71,7 +71,7 @@ defmodule HTTP2.Frame do
   }
 
   # others: %{error:, increment: , exclusive: nil, stream_dependency: nil, weight: nil}
-  defstruct length: 0, type: nil, flags: [], stream_id: nil, payload: nil, others: %{}
+  defstruct length: 0, type: nil, flags: [], stream_id: nil, payload: nil, others: %{}, padding: nil
 
   def parse(<<len::unsigned-24, type::unsigned-8, flags::unsigned-8, _::1, stream_id::unsigned-31, rest::binary>>)
       when byte_size(rest) >= len do
@@ -88,6 +88,49 @@ defmodule HTTP2.Frame do
 
   def parse(_) do
     nil
+  end
+
+  def generate(frame) do
+    do_generate(frame)
+  end
+
+  defp do_generate(%{type: :data, payload: payload} = frame) do
+    {frame, payload, IO.iodata_length(payload)}
+  end
+  defp do_generate(%{type: :headers, payload: payload, others: others, flags: flags} = frame) do
+    flags = if others[:weight] || others[:stream_dependency] || others[:exclusive] != nil do
+      unless others[:weight] && others[:stream_dependency] && others[:exclusive] != nil do
+        raise HTTP2.CompressionError, message: "Must specify all of priority parameters for headers"
+      end
+      if Enum.member?(flags, :priority), do: flags, else: [:priority | flags]
+    else
+      flags
+    end
+    {bytes, length} = if Enum.member?(flags, :priority) do
+      e = if others[:exclusive], do: 1, else: 0
+      weight = others[:weight] - 1
+      bytes = <<e::1, others[:stream_dependency]::31, weight::8>>
+      {bytes, 5}
+    else
+      {<<>>, 0}
+    end
+    bytes = <<bytes::binary, payload::binary>>
+    length = length + IO.iodata_length(payload)
+    {Map.put(frame, :flags, flags), bytes, length}
+  end
+  defp do_generate(%{type: :priority, others: others} = frame) do
+    unless others[:weight] && others[:stream_dependency] && others[:exclusive] != nil do
+      raise HTTP2.CompressionError, message: "Must specify all of priority parameters for headers"
+    end
+    e = if others[:exclusive], do: 1, else: 0
+    weight = others[:weight] - 1
+    bytes = <<e::1, others[:stream_dependency]::31, weight::8>>
+    {frame, bytes, 5}
+  end
+  defp do_generate(%{type: :rst_stream, others: %{error: error}} = frame) do
+    bytes = pack_error(error)
+  end
+  defp do_generate(%{type: :rst_stream, others: %{error: error}} = frame) do
   end
 
   @doc false
@@ -213,6 +256,18 @@ defmodule HTTP2.Frame do
       {name, _} -> parse_settings(len - 1, buf, [{name, val} | settings])
       _ -> parse_settings(len - 1, buf, settings)
     end
+  end
+
+  defp pack_error(err) when is_atom(err) do
+    err_num = Map.get(@defined_errors, err)
+    if err_num == nil, do: raise HTTP2.CompressionError, message: "Unknown error ID for #{err}"
+    pack_error(err_num)
+  end
+  defp pack_error(err) when is_integer(err) do
+    <<err::unsigned-32>>
+  end
+  defp pack_error(err) do
+    raise HTTP2.CompressionError, message: "Unknown error for #{err}"
   end
 
   defp unpack_error(err_num) do

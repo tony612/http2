@@ -170,4 +170,18 @@ defmodule HTTP2.FrameTest do
     buffer = <<1::24, 9, 1, 1::32, 123>>
     assert {%{length: 1, type: :continuation, stream_id: 1, payload: <<123>>}, <<>>} = parse(buffer)
   end
+
+  test "generate/1 DATA works" do
+    frame = %HTTP2.Frame{type: :data, payload: <<1>>}
+    assert generate(frame)
+  end
+
+  test "generate/1 HEADERS priority works" do
+    frame = %HTTP2.Frame{type: :headers, payload: <<1>>, flags: [:priority], others: %{
+                exclusive: true,
+                stream_dependency: 2,
+                weight: 4
+              }}
+    assert generate(frame)
+  end
 end
