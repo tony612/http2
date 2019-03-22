@@ -2,6 +2,7 @@ defmodule HTTP2.Connection do
   alias HTTP2.Const
   require HTTP2.Const
   require Logger
+  use HTTP2.FlowBuffer
 
   # Default values for SETTINGS frame, as defined by the spec.
   @spec_default_connection_settings %{
@@ -23,6 +24,8 @@ defmodule HTTP2.Connection do
 
   @preface_magic "PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n"
 
+  @default_weight 16
+
   @type t :: %__MODULE__{
           state: atom,
           latest_stream_id: integer,
@@ -30,7 +33,7 @@ defmodule HTTP2.Connection do
           local_settings: map,
           local_window_limit: integer,
           local_window: integer,
-          local_role: atom,
+          local_role: :server | :client,
           remote_settings: map,
           remote_window_limit: integer,
           remote_window: integer,
@@ -142,7 +145,7 @@ defmodule HTTP2.Connection do
         {:ok, conn}
 
       {frame, <<>>} ->
-        Logger.debug("Got frame #{inspect(frame)}")
+        Logger.debug("Got frame #{inspect(frame)} and buffer is empty")
         conn = handle_frame(conn, frame)
         {:ok, conn}
 
@@ -165,11 +168,12 @@ defmodule HTTP2.Connection do
     connection_error!()
   end
 
-  def handle_frame(conn, %{type: :headers, flags: flags, stream_id: stream_id, streams: streams} = frame) do
+  def handle_frame(%{streams: streams, local_role: role} = conn, %{type: :headers, flags: flags, stream_id: stream_id} = frame) do
     if Enum.member?(flags, :end_headers) do
       %{decompressor: table, state: state} = conn
+      %{payload: payload} = frame
 
-      case HTTP2.HPACK.decode(frame, table) do
+      case HTTP2.HPACK.decode(payload, table) do
         {:ok, headers, table} ->
           conn = %{conn | decompressor: table}
           frame = %{frame | payload: headers}
@@ -178,16 +182,33 @@ defmodule HTTP2.Connection do
           if state == :closed do
             {conn, frame}
           else
-            stream =
+            {conn, stream} =
               case Map.fetch(streams, stream_id) do
                 {:ok, s} ->
-                  s
+                  {conn, s}
 
                 :error ->
-                  s = activate_stream(stream_id)
+                  %{others: frame_others} = frame
+                  %{local_settings: %{initial_window_size: local_initial_window_size},
+                    remote_settings: %{initial_window_size: remote_initial_window_size}} = conn
+                  s = %HTTP2.Stream{
+                    id: stream_id,
+                    weight: Map.get(frame_others, :weight, @default_weight),
+                    stream_dependency: Map.get(frame_others, :stream_dependency, 0),
+                    exclusive: Map.get(frame_others, :exclusive, false),
+                    local_window_limit: local_initial_window_size,
+                    local_window: local_initial_window_size,
+                    remote_window: remote_initial_window_size
+                  }
+                  activate_stream(conn, stream_id, s)
               end
 
-            # TODO stream recv
+            if role == :server do
+              GenServer.call(stream, {:recv_frame, frame})
+            else
+              # TODO
+            end
+            conn
           end
 
         {:error, error} ->
@@ -199,8 +220,34 @@ defmodule HTTP2.Connection do
     end
   end
 
-  def handle_frame(conn, %{type: _} = frame) do
-    # TODO push_promise and others
+  def handle_frame(conn, %{type: :push_promise} = frame) do
+    # TODO push_promise
+  end
+
+  def handle_frame(%{streams: streams, local_role: role} = conn, %{type: type, stream_id: sid} = frame) do
+    # TODO others
+    case Map.fetch(streams, sid) do
+      {:ok, s} ->
+        conn = if role == :server do
+          GenServer.call(s, {:recv_frame, frame})
+          if type == :data do
+            update_local_window(conn, frame)
+            calculate_window_update(conn)
+          end
+        else
+        end
+
+      :error ->
+        case type do
+          :priority ->
+            # TODO
+            conn
+          :window_update ->
+            process_window_update(conn, frame)
+          _ ->
+            connection_error!()
+        end
+    end
   end
 
   defp connection_manage(%{state: :waiting_connection_preface} = conn, frame) do
@@ -369,9 +416,15 @@ defmodule HTTP2.Connection do
 
   defp connection_error!(error \\ :protocol_error) do
     # TODO
+    raise error
   end
 
-  def activate_stream(id) do
-
+  def activate_stream(%{streams: streams, local_role: role} = conn, id, s) do
+    s = if role == :server do
+      HTTP2.Server.Stream.new(s)
+    else
+    end
+    # TODO: listen stream events
+    {%{conn | streams: Map.put(streams, id, s)}, s}
   end
 end

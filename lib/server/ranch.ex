@@ -34,7 +34,7 @@ defmodule HTTP2.Server.Ranch do
         transport.setopts(socket, [active: 1024])
         loop(state)
       other ->
-        IO.inspect other
+        Logger.debug inspect(other)
     end
   end
 end

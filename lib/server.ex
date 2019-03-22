@@ -8,7 +8,6 @@ defmodule HTTP2.Server do
       else
         :ranch_tcp
       end
-    IO.inspect "ref: #{server.id} transport: #{transport}"
 
     {:ok, pid} =
       :ranch.start_listener(
